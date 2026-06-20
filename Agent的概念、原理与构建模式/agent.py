@@ -7,7 +7,7 @@ from typing import List, Callable, Tuple
 
 import click
 from dotenv import load_dotenv
-from openai import OpenAI
+from anthropic import Anthropic
 import platform
 
 from prompt_template import react_system_prompt_template
@@ -18,8 +18,8 @@ class ReActAgent:
         self.tools = { func.__name__: func for func in tools }
         self.model = model
         self.project_directory = project_directory
-        self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
+        self.client = Anthropic(
+            base_url="https://api.deepseek.com/anthropic",
             api_key=ReActAgent.get_api_key(),
         )
 
@@ -95,18 +95,32 @@ class ReActAgent:
     def get_api_key() -> str:
         """Load the API key from an environment variable."""
         load_dotenv()
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = os.getenv("DEEPSEEK_API_KEY")
         if not api_key:
-            raise ValueError("未找到 OPENROUTER_API_KEY 环境变量，请在 .env 文件中设置。")
+            raise ValueError("未找到 DEEPSEEK_API_KEY 环境变量，请在 .env 文件中设置。")
         return api_key
 
     def call_model(self, messages):
         print("\n\n正在请求模型，请稍等...")
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-        )
-        content = response.choices[0].message.content
+        # Anthropic API: system prompt 是独立参数，不在 messages 中
+        system_msg = None
+        conv_messages = []
+        for msg in messages:
+            if msg["role"] == "system":
+                system_msg = msg["content"]
+            else:
+                conv_messages.append({"role": msg["role"], "content": msg["content"]})
+
+        kwargs = {
+            "model": self.model,
+            "messages": conv_messages,
+            "max_tokens": 4096,
+        }
+        if system_msg:
+            kwargs["system"] = system_msg
+
+        response = self.client.messages.create(**kwargs)
+        content = response.content[0].text
         messages.append({"role": "assistant", "content": content})
         return content
 
@@ -216,7 +230,7 @@ def main(project_directory):
     project_dir = os.path.abspath(project_directory)
 
     tools = [read_file, write_to_file, run_terminal_command]
-    agent = ReActAgent(tools=tools, model="openai/gpt-4o", project_directory=project_dir)
+    agent = ReActAgent(tools=tools, model="deepseek-chat", project_directory=project_dir)
 
     task = input("请输入任务：")
 
